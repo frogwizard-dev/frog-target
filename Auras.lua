@@ -1,0 +1,359 @@
+local _, ns = ...
+local Auras = {}
+ns.Auras = Auras
+
+-- Status effects under the target bar, in two rows, each with its own settings: debuffs (yours,
+-- then everyone else's) and buffs, in either order (auras.order). Each row is one of 12.1's
+-- AuraContainers: the engine picks and draws the auras, so it keeps working where addons can't
+-- read aura data. Lessons carried over from PersonalResourceTweaks: position a container before
+-- setting it up, never anchor anything to it, and size the buttons ourselves (the engine makes
+-- them 0x0). How many auras there are can be secret, so each row is given room for one line.
+
+local SORT = AuraContainerSortMethod and AuraContainerSortMethod.Default
+local SORT_DIR = AuraContainerSortDirection and AuraContainerSortDirection.Normal
+local TIMER_HEIGHT = 12 -- the timer printed under each icon
+
+-- Per row: its container, what it was built with, its group keys and its styled buttons.
+local rows = { debuffs = { styled = {} }, buffs = { styled = {} } }
+
+local formatter
+local function DurationFormatter()
+    if formatter ~= nil then return formatter or nil end
+    formatter = false
+    local R = Enum.NumericRuleFormatRounding
+    if C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and R then
+        local f = C_StringUtil.CreateNumericRuleFormatter()
+        if pcall(f.SetBreakpoints, f, {
+            { threshold = 0, format = "%d", step = 1, rounding = R.Up },
+            { threshold = 60, format = "%dm", step = 1, rounding = R.Up, components = { { div = 60 } } },
+            { threshold = 61, format = "%dm", step = 1, rounding = R.Down, components = { { div = 60 } } },
+            { threshold = 3600, format = "%dh", step = 1, rounding = R.Down, components = { { div = 3600 } } },
+        }) then
+            formatter = f
+        end
+    end
+    return formatter or nil
+end
+
+local function CallEither(c, newName, oldName, ...)
+    local f = c[newName] or c[oldName]
+    if f then pcall(f, c, ...) end
+end
+
+-- Rounded icons, the shape of FrogUI's action bar buttons (and the cooldown manager's): the
+-- icon cut by the rounded mask inside a 2px border, the border rounded the same way round the
+-- whole button, and the cooldown sweep following the corners. Square: a 1px border.
+local MASK = "UI-HUD-CoolDownManager-Mask"
+local SWIPE = "Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe"
+
+local function Shape(icon, border, button, cooldown)
+    local rounded = ns.db.auras.rounded
+    local inset = rounded and 2 or 1
+    icon:ClearAllPoints()
+    icon:SetPoint("TOPLEFT", button, "TOPLEFT", inset, -inset)
+    icon:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -inset, inset)
+    if not rounded then return end
+    local inner = button:CreateMaskTexture()
+    inner:SetAtlas(MASK)
+    inner:SetAllPoints(icon)
+    pcall(icon.AddMaskTexture, icon, inner)
+    local outer = button:CreateMaskTexture()
+    outer:SetAtlas(MASK)
+    outer:SetAllPoints(button)
+    pcall(border.AddMaskTexture, border, outer)
+    if cooldown and cooldown.SetSwipeTexture then pcall(cooldown.SetSwipeTexture, cooldown, SWIPE) end
+end
+
+local function StyleButton(d)
+    local all, t = ns.db.auras, ns.db.text
+    local cfg = all[d.row]
+    if d.size ~= cfg.size and pcall(d.button.SetSize, d.button, cfg.size, cfg.size) then
+        d.size = cfg.size
+    end
+    local font, size = all.font or t.font, math.max(9, math.floor(cfg.size * 0.46))
+    ns.Media:SetFont(d.stack, font, size, t.outline)
+    ns.Media:SetFont(d.duration, font, size, t.outline)
+    d.duration:SetShown(cfg.showTimer)
+end
+
+local function MakeInit(row, harmful)
+    return function(button)
+        local d = { button = button, row = row }
+        d.border = button:CreateTexture(nil, "BACKGROUND")
+        d.border:SetAllPoints()
+        if harmful then
+            d.border:SetColorTexture(0.75, 0.12, 0.08, 1)
+        else
+            d.border:SetColorTexture(0, 0, 0, 1)
+        end
+        d.icon = button:CreateTexture(nil, "ARTWORK")
+        d.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        d.cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+        Shape(d.icon, d.border, button, d.cooldown)
+        d.cooldown:SetAllPoints(d.icon)
+        d.cooldown:SetDrawEdge(false)
+        d.cooldown:SetReverse(true)
+        d.cooldown:SetHideCountdownNumbers(true)
+        local carrier = CreateFrame("Frame", nil, button)
+        carrier:SetAllPoints()
+        carrier:SetFrameLevel(d.cooldown:GetFrameLevel() + 1)
+        carrier:EnableMouse(false)
+        d.stack = carrier:CreateFontString(nil, "OVERLAY")
+        d.stack:SetPoint("BOTTOMRIGHT", -1, 1)
+        -- The timer goes under the icon rather than on it.
+        d.duration = carrier:CreateFontString(nil, "OVERLAY")
+        d.duration:SetPoint("TOP", button, "BOTTOM", 0, -1)
+        StyleButton(d)
+
+        pcall(button.SetMouseClickEnabled, button, false)
+        button:SetIcon(d.icon)
+        button:SetDurationCooldown(d.cooldown)
+        button:SetApplicationCount(d.stack, {})
+        if not pcall(button.SetDurationText, button, d.duration, { textFormatter = DurationFormatter() }) then
+            pcall(button.SetDurationText, button, d.duration, {})
+        end
+        table.insert(rows[row].styled, d)
+    end
+end
+
+local function Layout(cfg, spacing)
+    -- Extra line spacing leaves room for the timer printed under each icon.
+    return { elementWidth = cfg.size, elementHeight = cfg.size, elementSpacing = spacing,
+        lineSpacing = spacing + (cfg.showTimer and TIMER_HEIGHT or 0) }
+end
+
+------------------------------------------------------------------------------
+-- Where the rows go
+------------------------------------------------------------------------------
+
+-- How far below the health bar the auras start: clear of the classic look's stone border, and
+-- of the cast bar and its spell name when that sits below the bar too.
+local function Top()
+    local db = ns.db
+    local y = db.style == "classic" and -10 or -6
+    if db.cast.enabled and db.cast.position == "below" then
+        y = y - (db.cast.gap + (db.style == "classic" and 10 or 2) + db.cast.height + db.text.size + 6)
+    end
+    return y
+end
+
+-- A row with nothing in it closes up (auras.fold), so the rows below move up, and opens again
+-- when something lands. How many auras there are can be secret, but whether there are any isn't:
+-- the first one's data comes back, or nothing does. Not while unlocked: the samples fill them.
+local empty = { debuffs = false, buffs = false }
+
+local function Filter(row)
+    if row == "buffs" then return "HELPFUL" end
+    return ns.db.auras.debuffs.mode == "mine" and "HARMFUL|PLAYER" or "HARMFUL"
+end
+
+local function HasAny(row)
+    if not UnitExists("target") then return false end
+    local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, "target", 1, Filter(row))
+    -- Can't tell: keep the row open.
+    if not ok or issecretvalue and issecretvalue(aura) then return true end
+    return aura ~= nil
+end
+
+local function Shown(row)
+    local all = ns.db.auras
+    if not (all.enabled and all[row].enabled) then return false end
+    return not ns.db.locked or not (all.fold and empty[row])
+end
+
+-- After a change of target or of its auras: lays the rows out again if one has opened or closed.
+function Auras:CheckEmpty()
+    local changed = false
+    for row in pairs(empty) do
+        local now = not HasAny(row)
+        if now ~= empty[row] then
+            empty[row] = now
+            changed = true
+        end
+    end
+    if changed and ns.db.auras.fold and ns.Target.frame then ns.Target:Apply() end
+end
+
+local watcher = CreateFrame("Frame")
+watcher:RegisterUnitEvent("UNIT_AURA", "target")
+watcher:RegisterEvent("PLAYER_TARGET_CHANGED")
+watcher:SetScript("OnEvent", function()
+    if ns.db then Auras:CheckEmpty() end
+end)
+
+local function Height(row)
+    local cfg = ns.db.auras[row]
+    return cfg.size + (cfg.showTimer and TIMER_HEIGHT or 0)
+end
+
+local function Order()
+    if ns.db.auras.order == "buffs" then return { "buffs", "debuffs" } end
+    return { "debuffs", "buffs" }
+end
+
+-- Where `row` starts, below the health bar: under the rows above it.
+local function RowTop(row)
+    local y = Top()
+    for _, other in ipairs(Order()) do
+        if other == row then return y end
+        if Shown(other) then y = y - Height(other) - ns.db.auras.rowGap end
+    end
+    return y
+end
+
+-- Where the last shown row ends: a cast bar set "under the auras" goes below it.
+function ns.AurasBottom()
+    local y, any = Top(), false
+    for _, row in ipairs(Order()) do
+        if Shown(row) then
+            y = RowTop(row) - Height(row)
+            any = true
+        end
+    end
+    return any and y or Top() + 6
+end
+
+------------------------------------------------------------------------------
+-- Building and applying
+------------------------------------------------------------------------------
+
+local function Signature(row)
+    local cfg = ns.db.auras[row]
+    return (cfg.mode or "") .. "|" .. cfg.max .. "|" .. RowTop(row) .. "|" .. tostring(ns.db.auras.rounded)
+end
+
+local function Build(row, parent, anchor)
+    local r, all = rows[row], ns.db.auras
+    local cfg = all[row]
+    if r.container then
+        pcall(r.container.SetUnit, r.container, "none")
+        r.container:Hide()
+        r.container = nil
+    end
+    if not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then
+        C_AddOns.LoadAddOn("Blizzard_AuraContainer")
+    end
+    local ok, c = pcall(CreateFrame, "AuraContainer", nil, parent, "CustomAuraContainerTemplate")
+    if not ok then return end
+
+    c:SetSize(1, 1)
+    c:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, RowTop(row))
+    CallEither(c, "SetFlowLayoutAnchorPoint", "SetAuraLayoutAnchorPoint", "TOPLEFT")
+    CallEither(c, "SetFlowLayoutGrowthDirection", "SetAuraLayoutGrowthDirection",
+        AnchorUtil.FlowDirection.Right, AnchorUtil.FlowDirection.Down)
+
+    wipe(r.styled)
+    r.keys = {}
+    local layout = Layout(cfg, all.spacing)
+    local function add(key, filter, harmful)
+        local ok2, err = pcall(c.AddAuraGroup, c, key, filter, {
+            maxFrameCount = cfg.max, sortMethod = SORT, sortDirection = SORT_DIR,
+            initializeFrame = MakeInit(row, harmful), layout = layout,
+        })
+        if ok2 then r.keys[#r.keys + 1] = key else ns.Print("Couldn't set up status effects:", err) end
+    end
+    if row == "debuffs" then
+        -- Yours first, then everyone else's.
+        add("mine", "HARMFUL|PLAYER", true)
+        if cfg.mode == "all" then add("others", "HARMFUL|!PLAYER", true) end
+    else
+        add("buffs", "HELPFUL", false)
+    end
+    c:SetUnit("target")
+    c:UpdateAllAuras()
+    r.container = c
+    r.signature = Signature(row)
+end
+
+function Auras:Apply(parent, anchor)
+    local all = ns.db.auras
+    for row, r in pairs(rows) do
+        -- Where it sits is part of what it's built with: moving it means building it again.
+        if not r.container or r.signature ~= Signature(row) then Build(row, parent, anchor) end
+        local c = r.container
+        if c then
+            local layout = Layout(all[row], all.spacing)
+            for _, key in ipairs(r.keys) do pcall(c.SetAuraGroupLayout, c, key, layout) end
+            CallEither(c, "SetFlowLayoutMaximumLineSize", "SetAuraLayoutRowWidth", ns.db.width + 0.4)
+            c:SetShown(Shown(row))
+            for _, d in ipairs(r.styled) do pcall(StyleButton, d) end
+        end
+    end
+end
+
+------------------------------------------------------------------------------
+-- While unlocked: pretend auras in each row where the real ones go (the real ones hidden), so
+-- the layout can be judged without a target that has any.
+------------------------------------------------------------------------------
+
+local SAMPLES = {
+    debuffs = {
+        { icon = "Interface\\Icons\\Ability_Warrior_Sunder", time = "24s", stack = "3" },
+        { icon = "Interface\\Icons\\Ability_Gouge", time = "12s" },
+        { icon = "Interface\\Icons\\Ability_Warrior_WarCry", time = "18s" },
+        { icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain", time = "6s" },
+    },
+    buffs = {
+        { icon = "Interface\\Icons\\Spell_Holy_PowerWordShield", time = "25s" },
+        { icon = "Interface\\Icons\\Spell_Nature_Rejuvenation", time = "1m" },
+        { icon = "Interface\\Icons\\Spell_Holy_WordFortitude", time = "28m" },
+    },
+}
+local samples = { debuffs = {}, buffs = {} }
+
+local function Sample(parent, row, i)
+    local s = samples[row][i]
+    -- A sample's shape is fixed when it's made, like a real icon's: remade if the shape changed.
+    if s and s.rounded == ns.db.auras.rounded then return s end
+    if s then s:Hide() end
+    s = CreateFrame("Frame", nil, parent)
+    s.border = s:CreateTexture(nil, "BACKGROUND")
+    s.border:SetAllPoints()
+    s.icon = s:CreateTexture(nil, "ARTWORK")
+    s.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    Shape(s.icon, s.border, s)
+    s.rounded = ns.db.auras.rounded
+    s.stack = s:CreateFontString(nil, "OVERLAY")
+    s.stack:SetPoint("BOTTOMRIGHT", -1, 1)
+    s.duration = s:CreateFontString(nil, "OVERLAY")
+    s.duration:SetPoint("TOP", s, "BOTTOM", 0, -1)
+    samples[row][i] = s
+    return s
+end
+
+function Auras:Preview(parent, anchor, on)
+    local all, t = ns.db.auras, ns.db.text
+    for row, r in pairs(rows) do
+        if r.container then r.container:SetShown(Shown(row) and not on) end
+        local cfg = all[row]
+        local show = on and Shown(row)
+        local size = cfg.size
+        local font, fontSize = all.font or t.font, math.max(9, math.floor(size * 0.46))
+        for i, d in ipairs(SAMPLES[row]) do
+            local s = Sample(parent, row, i)
+            if show then
+                s:SetSize(size, size)
+                s:ClearAllPoints()
+                s:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", (i - 1) * (size + all.spacing), RowTop(row))
+                s.icon:SetTexture(d.icon)
+                if row == "debuffs" then
+                    s.border:SetColorTexture(0.8, 0.1, 0.1, 1)
+                else
+                    s.border:SetColorTexture(0, 0, 0, 1)
+                end
+                ns.Media:SetFont(s.stack, font, fontSize, t.outline)
+                ns.Media:SetFont(s.duration, font, fontSize, t.outline)
+                s.stack:SetText(d.stack or "")
+                s.duration:SetText(cfg.showTimer and d.time or "")
+            end
+            s:SetShown(show)
+        end
+    end
+end
+
+-- The containers are bound to the "target" token; a new target needs a fresh parse.
+function Auras:TargetChanged()
+    for _, r in pairs(rows) do
+        if r.container then pcall(r.container.UpdateAllAuras, r.container) end
+    end
+end
