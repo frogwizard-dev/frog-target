@@ -2,7 +2,7 @@ local _, ns = ...
 local Config = {}
 ns.Config = Config
 
-local W, H = 440, 720
+local W, H = 500, 720
 
 -- Same control set as PersonalResourceTweaks' settings window.
 
@@ -45,6 +45,7 @@ local function Stepper(parent, text, min, max, step, get, set, fmt)
     plus:SetPoint("LEFT", val, "RIGHT", 4, 0)
     local function refresh() val:SetText(fmt and string.format(fmt, get()) or get()) end
     local function change(d)
+        if IsShiftKeyDown() then d = d * 10 end -- shift-click: ten steps at once
         local v = math.max(min, math.min(max, get() + d))
         set(math.floor(v / step + 0.5) * step)
         refresh()
@@ -165,7 +166,7 @@ end
 function Config:BuildBar(p)
     local db = ns.db
     local place = Placer()
-    place(Checkbox(p, "Unlock to move (drag the bar; shows a preview)",
+    place(Checkbox(p, "Unlock to move (drag the bars; shows previews)",
         function() return not db.locked end, function(v) db.locked = not v end), 28)
     place(Checkbox(p, "Click to target, right-click for the menu",
         function() return db.clicks end, function(v) db.clicks = v end), 28)
@@ -221,6 +222,65 @@ function Config:BuildText(p)
     place(Stepper(p, "Text size", 8, 24, 1, function() return t.size end, function(v) t.size = v end), 28)
     place(Checkbox(p, "Tint the text to match the bar",
         function() return t.tinted end, function(v) t.tinted = v end), 28)
+    place(Checkbox(p, "Colour the level by difficulty, with a skull for bosses",
+        function() return t.levelColor end, function(v) t.levelColor = v end), 28)
+end
+
+function Config:BuildPower(p)
+    local cfg = ns.db.power
+    local place = Placer()
+    place(Checkbox(p, "Show the target's power bar (mana, rage, energy)",
+        function() return cfg.enabled end, function(v) cfg.enabled = v end), 28)
+    place(Checkbox(p, "Float it over the bottom edge of the health bar",
+        function() return cfg.float end, function(v) cfg.float = v end), 26)
+    place(Checkbox(p, "Hide it while it's empty (an enemy that hasn't built any rage)",
+        function() return cfg.hideEmpty end, function(v) cfg.hideEmpty = v end), 30)
+    place(Stepper(p, "Width (% of the bar)", 20, 100, 5, function() return cfg.width end,
+        function(v) cfg.width = v end, "%d%%"), 26)
+    place(Stepper(p, "Move up / down", -20, 20, 1, function() return cfg.offset end,
+        function(v) cfg.offset = v end), 26)
+    place(Stepper(p, "Move left / right", -200, 200, 2, function() return cfg.x end,
+        function(v) cfg.x = v end), 26)
+    local help = Label(p, "Width and moving it are for a floating bar; otherwise it runs the full width "
+        .. "under the health bar. Shift-click + or - for ten steps at once.", "GameFontDisableSmall")
+    help:SetWidth(W - 40)
+    help:SetJustifyH("LEFT")
+    place(help, 30, 4)
+    place(Stepper(p, "Height", 2, 20, 1, function() return cfg.height end, function(v) cfg.height = v end), 32)
+    place(TextBox(p, "Text on it", function() return cfg.text end, function(v) cfg.text = v end), 30)
+    local words = Label(p, "Words: |cffffd100value|r, |cffffd100max|r, |cffffd100percent|r (the power's), "
+        .. "|cffffd100name|r, |cffffd100level|r. Leave empty to hide.", "GameFontDisableSmall")
+    words:SetWidth(W - 40)
+    words:SetJustifyH("LEFT")
+    place(words, 30, 4)
+    place(Stepper(p, "Text size", 6, 20, 1, function() return cfg.textSize end, function(v) cfg.textSize = v end), 34)
+    local more = Label(p, "The focus bar's power bar is switched on on the Focus page.", "GameFontDisableSmall")
+    place(more, 20, 4)
+end
+
+function Config:BuildFocus(p)
+    local cfg = ns.db.focus
+    local place = Placer()
+    place(Checkbox(p, "Show a bar for your focus",
+        function() return cfg.enabled end, function(v) cfg.enabled = v end), 28)
+    place(Checkbox(p, "Hide Blizzard's focus frame while it's on",
+        function() return cfg.hideBlizzard end, function(v) cfg.hideBlizzard = v end), 34)
+    place(Stepper(p, "Scale", 0.5, 2, 0.05, function() return cfg.scale end, function(v) cfg.scale = v end, "%.2f"), 26)
+    place(Stepper(p, "Width", 150, 900, 10, function() return cfg.width end, function(v) cfg.width = v end), 34)
+    place(Checkbox(p, "Show the focus's casts",
+        function() return cfg.cast end, function(v) cfg.cast = v end), 28)
+    place(Checkbox(p, "Show the focus's status effects",
+        function() return cfg.auras end, function(v) cfg.auras = v end), 28)
+    place(Checkbox(p, "Show the focus's power bar",
+        function() return cfg.power end, function(v) cfg.power = v end), 28)
+    place(Checkbox(p, "Show your focus's target beside it",
+        function() return cfg.tot end, function(v) cfg.tot = v end), 34)
+    local help = Label(p, "It uses the look, text, icons, and the cast, status, power and ToT settings of the "
+        .. "other pages. Unlock on the Bar page to move it: it shows a sample when you have no focus.",
+        "GameFontDisableSmall")
+    help:SetWidth(W - 40)
+    help:SetJustifyH("LEFT")
+    place(help, 40, 4)
 end
 
 function Config:BuildToT(p)
@@ -236,7 +296,7 @@ end
 function Config:BuildAuras(p)
     local cfg = ns.db.auras
     local place = Placer()
-    place(Checkbox(p, "Show status effects under the bar",
+    place(Checkbox(p, "Show status effects under the target bar",
         function() return cfg.enabled end, function(v) cfg.enabled = v end), 30)
     place(Dropdown(p, "Which row on top", Options("debuffs", "Debuffs, then buffs", "buffs", "Buffs, then debuffs"),
         function() return cfg.order end, function(v) cfg.order = v end), 30)
@@ -309,10 +369,11 @@ function Config:Build()
             if k == key then tab:LockHighlight() else tab:UnlockHighlight() end
         end
     end
-    for i, def in ipairs({ { "bar", "Bar" }, { "text", "Text" }, { "tot", "ToT" }, { "auras", "Status" }, { "icons", "Icons" } }) do
+    for i, def in ipairs({ { "bar", "Bar" }, { "text", "Text" }, { "power", "Power" }, { "tot", "ToT" },
+        { "auras", "Status" }, { "icons", "Icons" }, { "focus", "Focus" } }) do
         local key = def[1]
-        local tab = Button(f, def[2], 80)
-        tab:SetPoint("TOPLEFT", 14 + (i - 1) * 83, -30)
+        local tab = Button(f, def[2], 64)
+        tab:SetPoint("TOPLEFT", 14 + (i - 1) * 67, -30)
         tab:SetScript("OnClick", function() select(key) end)
         tabs[key] = tab
         local page = CreateFrame("Frame", nil, f)
@@ -322,9 +383,11 @@ function Config:Build()
     end
     self:BuildBar(pages.bar)
     self:BuildText(pages.text)
+    self:BuildPower(pages.power)
     self:BuildToT(pages.tot)
     self:BuildAuras(pages.auras)
     self:BuildIcons(pages.icons)
+    self:BuildFocus(pages.focus)
     select("bar")
 end
 
@@ -338,9 +401,9 @@ function Config:Toggle()
 end
 
 -- Its entry in the game's Options > AddOns list (Options.lua).
-ns.AddOptionsPanel({
+FrogLib.Options.Add("FrogTarget", ns, {
     open = function()
         if not (Config.frame and Config.frame:IsShown()) then Config:Toggle() end
     end,
-    commands = { { "/xiv", "open or close the settings" } },
+    commands = { { "/ft", "open or close the settings" } },
 })

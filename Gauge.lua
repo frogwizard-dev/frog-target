@@ -5,13 +5,13 @@ local _, ns = ...
 --              and old frames use;
 --   "modern":  a plain fill on a dark track, with nothing round it but a 1px black
 --              edge;
---   "forever": the cooldown manager's bar fill, in our own Forever-style frame (below).
+--   "forever": the cooldown manager's bar fill, in our own Forever-style frame (FrogLib's).
 -- Same methods as the XIV addons' gauges, so Target.lua drives them unchanged: SetHeight,
--- SetTexture, SetColor, SetValues, and the absorb shield ones; SetSpark adds the cast bar's spark.
+-- SetTexture, SetColor, SetValues, and the absorb shield ones; SetSpark adds the cast bar's spark,
+-- SetTrackAlpha darkens the empty part (the floating power bar).
 
 local WHITE = "Interface\\Buttons\\WHITE8X8"
 local SPARK = "Interface\\CastingBar\\UI-CastingBar-Spark"
-local STONE = "Interface\\Tooltips\\UI-Tooltip-Border"
 local SMOOTH = Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut
 local IMMEDIATE = Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.Immediate
 
@@ -24,57 +24,9 @@ local STYLES = {
         texture = "Interface\\TargetingFrame\\UI-StatusBar" },
 }
 
--- The Forever frame: our own (Media\ForeverFrame.tga, 16x16), in the style of Forever's bar
--- frames: a dark outline, a light metallic rim brighter along the top, and a dark inner line,
--- each one screen pixel wide, with the corners cut. Nine-sliced at one texel per screen pixel, so
--- it's crisp at any bar size and nothing stretches but its straight edges. It sits 2 pixels out
--- from the bar, its inner line over the fill's edge, so the fill sits inside it.
-local FRAME_FILE = "Interface\\AddOns\\FrogTarget\\Media\\ForeverFrame.tga"
-local FRAME_SIZE, FRAME_SLICE, FRAME_OUT = 16, 3, 2
-local FRAME_KEYS = { "tl", "t", "tr", "l", "r", "bl", "b", "br" }
-
-local function FrameArt(bar)
-    local p = {}
-    for _, key in ipairs(FRAME_KEYS) do
-        local t = bar:CreateTexture(nil, "OVERLAY", nil, 5)
-        t:SetTexture(FRAME_FILE, nil, nil, "NEAREST")
-        if t.SetSnapToPixelGrid then
-            t:SetSnapToPixelGrid(false)
-            t:SetTexelSnappingBias(0)
-        end
-        p[key] = t
-    end
-    return p
-end
-
--- thickness: screen pixels per texel (1 to 3), a whole number so it stays crisp.
-local function PlaceFrameArt(p, bar, thickness)
-    local px = (thickness or 1) * 768 / select(2, GetPhysicalScreenSize()) / bar:GetEffectiveScale()
-    local m, out = FRAME_SLICE * px, FRAME_OUT * px
-    local a, b = FRAME_SLICE / FRAME_SIZE, (FRAME_SIZE - FRAME_SLICE) / FRAME_SIZE
-    p.tl:SetTexCoord(0, a, 0, a)
-    p.t:SetTexCoord(a, b, 0, a)
-    p.tr:SetTexCoord(b, 1, 0, a)
-    p.l:SetTexCoord(0, a, a, b)
-    p.r:SetTexCoord(b, 1, a, b)
-    p.bl:SetTexCoord(0, a, b, 1)
-    p.b:SetTexCoord(a, b, b, 1)
-    p.br:SetTexCoord(b, 1, b, 1)
-    for _, t in pairs(p) do t:ClearAllPoints() end
-    p.tl:SetPoint("TOPLEFT", bar, "TOPLEFT", -out, out)
-    p.tr:SetPoint("TOPRIGHT", bar, "TOPRIGHT", out, out)
-    p.bl:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", -out, -out)
-    p.br:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", out, -out)
-    for _, key in ipairs({ "tl", "tr", "bl", "br" }) do p[key]:SetSize(m, m) end
-    p.t:SetPoint("TOPLEFT", p.tl, "TOPRIGHT")
-    p.t:SetPoint("BOTTOMRIGHT", p.tr, "BOTTOMLEFT")
-    p.b:SetPoint("TOPLEFT", p.bl, "TOPRIGHT")
-    p.b:SetPoint("BOTTOMRIGHT", p.br, "BOTTOMLEFT")
-    p.l:SetPoint("TOPLEFT", p.tl, "BOTTOMLEFT")
-    p.l:SetPoint("BOTTOMRIGHT", p.bl, "TOPRIGHT")
-    p.r:SetPoint("TOPLEFT", p.tr, "BOTTOMLEFT")
-    p.r:SetPoint("BOTTOMRIGHT", p.br, "TOPRIGHT")
-end
+-- The borders (Edges, the classic stone and the Forever frame): FrogLib's
+-- (Libs\FrogLib\Borders.lua).
+local Borders = FrogLib.Borders
 
 local function Loaded(addon)
     local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
@@ -101,24 +53,14 @@ function ns.CreateGauge(parent)
 
     g.track = bar:CreateTexture(nil, "BACKGROUND")
     g.track:SetAllPoints()
-    -- Forever: the cooldown manager's frame, behind and round the bar.
-    g.frame = FrameArt(bar)
+    -- Forever: our Forever-style frame round the bar.
+    g.frame = Borders.Forever(bar, "OVERLAY", 5)
 
     -- Classic: the stone border, on a frame just outside the bar.
-    g.stone = CreateFrame("Frame", nil, bar, "BackdropTemplate")
-    g.stone:SetFrameLevel(bar:GetFrameLevel() + 3)
+    g.stone = Borders.Stone(bar, 3)
 
     -- Modern: a thin dark edge round the bar.
-    g.edge = {}
-    for _, key in ipairs({ "top", "bottom", "left", "right" }) do
-        local t = bar:CreateTexture(nil, "OVERLAY", nil, 6)
-        t:SetColorTexture(0, 0, 0, 1)
-        if t.SetSnapToPixelGrid then
-            t:SetSnapToPixelGrid(false)
-            t:SetTexelSnappingBias(0)
-        end
-        g.edge[key] = t
-    end
+    g.edge = Borders.Edges(bar, bar, "OVERLAY", 6)
 
     g.spark = bar:CreateTexture(nil, "OVERLAY", nil, 7)
     g.spark:SetTexture(SPARK)
@@ -154,44 +96,22 @@ function Gauge:Layout()
     local style, bar = self:Style(), self.bar
     bar:SetHeight(self.h)
 
-    if style.frame then PlaceFrameArt(self.frame, bar, ns.db and ns.db.frameThickness) end
-    self.track:SetColorTexture(0, 0, 0, 0.55)
-    for _, t in pairs(self.frame) do t:SetShown(style.frame == true) end
+    if style.frame then self.frame:Place(ns.db and ns.db.frameThickness) end
+    self.track:SetColorTexture(0, 0, 0, self.trackAlpha or 0.55)
+    self.frame:SetShown(style.frame == true)
 
     if style.stone then
         -- The stone line is the outer ~3px of its 12px edge: with the frame 3px past the bar, the
         -- line meets the fill, with no dark gap between them.
-        self.stone:ClearAllPoints()
-        self.stone:SetPoint("TOPLEFT", bar, "TOPLEFT", -3, 3)
-        self.stone:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 3, -3)
-        self.stone:SetBackdrop({ edgeFile = STONE, edgeSize = 12 })
-        local c = ns.db and ns.db.borderColor or { r = 0.75, g = 0.75, b = 0.75 }
-        self.stone:SetBackdropBorderColor(c.r, c.g, c.b, 1)
+        Borders.ColorStone(self.stone, ns.db and ns.db.borderColor)
         self.stone:Show()
     else
         self.stone:Hide()
     end
 
     -- One screen pixel, outside the bar.
-    local p = 768 / select(2, GetPhysicalScreenSize()) / bar:GetEffectiveScale()
-    local e = self.edge
-    e.top:ClearAllPoints()
-    e.top:SetPoint("BOTTOMLEFT", bar, "TOPLEFT", -p, 0)
-    e.top:SetPoint("BOTTOMRIGHT", bar, "TOPRIGHT", p, 0)
-    e.top:SetHeight(p)
-    e.bottom:ClearAllPoints()
-    e.bottom:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", -p, 0)
-    e.bottom:SetPoint("TOPRIGHT", bar, "BOTTOMRIGHT", p, 0)
-    e.bottom:SetHeight(p)
-    e.left:ClearAllPoints()
-    e.left:SetPoint("TOPRIGHT", bar, "TOPLEFT", 0, 0)
-    e.left:SetPoint("BOTTOMRIGHT", bar, "BOTTOMLEFT", 0, 0)
-    e.left:SetWidth(p)
-    e.right:ClearAllPoints()
-    e.right:SetPoint("TOPLEFT", bar, "TOPRIGHT", 0, 0)
-    e.right:SetPoint("BOTTOMLEFT", bar, "BOTTOMRIGHT", 0, 0)
-    e.right:SetWidth(p)
-    for _, t in pairs(e) do t:SetShown(style.edge == true) end
+    self.edge:Place(1, 0, { r = 0, g = 0, b = 0 })
+    self.edge:SetShown(style.edge == true)
 
     self.spark:SetSize(math.max(10, self.h * 1.6), self.h * 2.6)
     self:ApplyTexture()
@@ -210,6 +130,13 @@ end
 function Gauge:SetTexture(path)
     self.texturePath = path
     self:Layout()
+end
+
+-- How dark the empty part of the bar is (nil: the usual). The floating power bar's is darker,
+-- so the health bar under it doesn't show through.
+function Gauge:SetTrackAlpha(alpha)
+    self.trackAlpha = alpha
+    self.track:SetColorTexture(0, 0, 0, alpha or 0.55)
 end
 
 -- The cast bar's spark, at the end of the fill.

@@ -3,7 +3,8 @@ local ADDON, ns = ...
 -- FrogTarget: XIVTarget's target bar (the name above a long bar, the cast floating over its
 -- right half, auras below, your target's target alongside) drawn in WoW's own art, in three
 -- looks: "classic" (1.x), "modern" (plain, a 1px edge) and "forever" (the cooldown manager's
--- bars). Gauge.lua draws the bars; the rest is XIVTarget's.
+-- bars). Gauge.lua draws the bars; the rest is XIVTarget's. Target.lua makes the same bar for
+-- the focus too (off by default).
 ns.defaults = {
     locked = true,
     point = { "TOP", "UIParent", "TOP", 0, -140 },
@@ -26,6 +27,7 @@ ns.defaults = {
         outline = "OUTLINE",
         size = 12,
         tinted = false, -- text in a light version of the bar's colour
+        levelColor = true, -- the level coloured by difficulty, a skull for bosses (as the game's frame)
         -- Templates: words level, name, value, max, percent (percent.1 for a decimal).
         left = "level  name",
         right = "value / max   percent",
@@ -53,6 +55,22 @@ ns.defaults = {
         font = "Interface\\AddOns\\FrogTarget\\Fonts\\SourceSans3.ttf",
         debuffs = { enabled = true, mode = "all", size = 26, max = 12, showTimer = true },
         buffs = { enabled = true, size = 22, max = 8, showTimer = true },
+    },
+    -- The unit's power (mana, rage, energy) on a bar of its own: under the health bar, full width,
+    -- or (float) centred on the health bar's bottom edge, drawn over it, `width` per cent as wide
+    -- and raised `offset` pixels. text: a template like the ones above (value, max, percent are
+    -- the power's); empty hides it.
+    power = { enabled = false, float = true, width = 60, height = 8, offset = 0, x = 0, hideEmpty = true, text = "", textSize = 10 },
+    -- A second bar, the same as the target's, for your focus. Its own place, scale and width, and
+    -- its own switches for the parts; the look, the text and the parts' settings are shared.
+    focus = {
+        enabled = false,
+        hideBlizzard = true, -- hide Blizzard's focus frame while this one is on
+        point = { "TOP", "UIParent", "TOP", -380, -300 },
+        scale = 1,
+        width = 240,
+        cast = true, auras = true, power = false,
+        tot = false, -- the focus's target beside it
     },
 }
 
@@ -104,10 +122,22 @@ function ns.Compile(template)
     return c
 end
 
+-- The level as the game's target frame shows it (text.levelColor): in the colour for how hard
+-- the unit is for you (grey, green, yellow, orange, red), or a skull when it's too high to show.
+-- The colour codes sit inside the text, so they win over a tinted text colour.
+local SKULL = "|TInterface\\TargetingFrame\\UI-TargetingFrame-Skull:0|t"
+
 local function Level(unit)
     local level = UnitLevel(unit)
     if ns.issecret(level) then return level end
-    if not level or level < 0 then return "??" end -- skull-level bosses
+    local coloured = ns.db.text.levelColor
+    if not level or level < 0 then return coloured and SKULL or "??" end -- skull-level bosses
+    if coloured and GetCreatureDifficultyColor then
+        local c = GetCreatureDifficultyColor(level)
+        if c then
+            return string.format("|cff%02x%02x%02x%d|r", c.r * 255, c.g * 255, c.b * 255, level)
+        end
+    end
     return tostring(level)
 end
 
@@ -120,7 +150,16 @@ local function HealthPercent(unit)
     return h / m * 100
 end
 
--- Fills a FontString from a template for a unit. fake = values for the unlocked preview.
+local function PowerPercent(unit)
+    if UnitPowerPercent and CurveConstants then
+        local ok, p = pcall(UnitPowerPercent, unit, nil, false, CurveConstants.ScaleTo100)
+        if ok and (ns.issecret(p) or p) then return p end
+    end
+    local v, m = UnitPower(unit), UnitPowerMax(unit)
+    if ns.issecret(v) or ns.issecret(m) or m == 0 then return 0 end
+    return v / m * 100
+end
+
 -- A unit's name as the game's own frames show it: on Forever that includes the surname
 -- (GetUnitName's second argument), where UnitName gives only the first name.
 local function FullName(unit)
@@ -131,23 +170,32 @@ local function FullName(unit)
     return UnitName(unit)
 end
 
-function ns.SetUnitText(fs, template, unit, fake)
+-- Fills a FontString from a template for a unit. fake = values for the unlocked preview;
+-- power = value, max and percent are the unit's power rather than its health.
+function ns.SetUnitText(fs, template, unit, fake, power)
     if not template or strtrim(template) == "" then
         fs:Hide()
         return
     end
     fs:Show()
-    local vals = fake or {
-        name = FullName(unit), level = Level(unit),
-        value = UnitHealth(unit), max = UnitHealthMax(unit), percent = HealthPercent(unit),
-    }
+    local vals = fake
+    if not vals then
+        vals = { name = FullName(unit), level = Level(unit) }
+        if power then
+            vals.value, vals.max, vals.percent = UnitPower(unit), UnitPowerMax(unit), PowerPercent(unit)
+        else
+            vals.value, vals.max, vals.percent = UnitHealth(unit), UnitHealthMax(unit), HealthPercent(unit)
+        end
+    end
     local c = ns.Compile(template)
     local a = c.args
     pcall(fs.SetFormattedText, fs, c.pattern, vals[a[1]], vals[a[2]], vals[a[3]], vals[a[4]], vals[a[5]], vals[a[6]])
 end
 
 function ns.Refresh()
-    if ns.Target then ns.Target:Apply() end
+    for _, bar in ipairs(ns.Bars or {}) do
+        if bar.frame then bar:Apply() end
+    end
 end
 
 local f = CreateFrame("Frame")
@@ -173,7 +221,7 @@ f:SetScript("OnEvent", function(_, event, arg1)
         CopyDefaults(ns.defaults, db)
         ns.db = db
     elseif event == "PLAYER_LOGIN" then
-        ns.Target:Init()
+        for _, bar in ipairs(ns.Bars) do bar:Init() end
     end
 end)
 
