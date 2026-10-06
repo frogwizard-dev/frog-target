@@ -174,7 +174,7 @@ function Auras:HasAny(row)
     if not UnitExists(self.unit) then return false end
     local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, self.unit, 1, Filter(row))
     -- Can't tell: keep the row open.
-    if not ok or issecretvalue and issecretvalue(aura) then return true end
+    if not ok or FrogLib.issecret(aura) then return true end
     return aura ~= nil
 end
 

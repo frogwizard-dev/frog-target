@@ -28,10 +28,7 @@ local STYLES = {
 -- (Libs\FrogLib\Borders.lua).
 local Borders = FrogLib.Borders
 
-local function Loaded(addon)
-    local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
-    return isLoaded and isLoaded(addon)
-end
+local Loaded = FrogLib.Loaded
 
 local function HasAtlas(name)
     return name and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(name) ~= nil

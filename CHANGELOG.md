@@ -1,5 +1,15 @@
 # FrogTarget
 
+## 0.2.1
+
+- Casts whose spell the game hides from add-ons now show on the cast bar instead of causing an error, and after an interrupt the bar shows its sample again while unlocked.
+- Hiding Blizzard's target and focus frames now holds through combat and Edit Mode: they go at once, even mid-fight, instead of waiting for the fight to end, and stay gone when the game lays them out again. It also works alongside other add-ons that hide the same frames.
+- Names the game hides from add-ons (in some instances) now show, instead of stopping the bar's text from updating; a player whose class the game hides no longer causes an error in the reaction colours.
+- Text with more than six words now keeps updating (it stopped).
+- New text words, as XIVTarget's: `class` (a player's class in its colour, a creature's type), and `power`, `powermax`, `powerpercent`, `powertype` for the unit's mana, rage or energy (updated as it changes).
+- Your own level shows plain rather than in a difficulty colour, as the game's frames show it; a level of 0 shows as "??".
+- Under the hood: text, colours, icons and the click buttons are FrogLib's, shared with XIVTarget and FrogFrames.
+
 ## 0.2.0
 
 - A focus bar: the same bar as the target's, for your focus, with its own place (move it with the same unlock, grid and centre snapping), scale and width, and its own switches for its cast bar, status effects, power bar and your focus's target. It shares the look and text with the target bar. Off by default: switch it on on the new **Focus** page, which can also hide Blizzard's focus frame while it's on.

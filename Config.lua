@@ -211,11 +211,13 @@ function Config:BuildText(p)
     local place = Placer()
     place(TextBox(p, "Above bar, left", function() return t.left end, function(v) t.left = v end), 28)
     place(TextBox(p, "Above bar, right", function() return t.right end, function(v) t.right = v end), 30)
-    local help = Label(p, "Words: |cffffd100level|r, |cffffd100name|r, |cffffd100value|r, |cffffd100max|r, "
-        .. "|cffffd100percent|r (|cffffd100percent.1|r for a decimal). Leave empty to hide.", "GameFontDisableSmall")
+    local help = Label(p, "Words: |cffffd100level|r, |cffffd100name|r, |cffffd100class|r, |cffffd100value|r, "
+        .. "|cffffd100max|r, |cffffd100percent|r (|cffffd100percent.1|r for a decimal), |cffffd100power|r, "
+        .. "|cffffd100powermax|r, |cffffd100powerpercent|r, |cffffd100powertype|r. Leave empty to hide.",
+        "GameFontDisableSmall")
     help:SetWidth(W - 40)
     help:SetJustifyH("LEFT")
-    place(help, 36, 4)
+    place(help, 44, 4)
     place(Dropdown(p, "Font", function() return ns.Media:List("font") end,
         function() return t.font end, function(v) t.font = v end), 30)
     place(Dropdown(p, "Font outline", OUTLINES, function() return t.outline end, function(v) t.outline = v end), 30)

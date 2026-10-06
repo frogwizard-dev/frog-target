@@ -28,7 +28,8 @@ ns.defaults = {
         size = 12,
         tinted = false, -- text in a light version of the bar's colour
         levelColor = true, -- the level coloured by difficulty, a skull for bosses (as the game's frame)
-        -- Templates: words level, name, value, max, percent (percent.1 for a decimal).
+        -- Templates: words level, name, class, value, max, percent (percent.1 for a decimal),
+        -- power, powermax, powerpercent, powertype.
         left = "level  name",
         right = "value / max   percent",
     },
@@ -74,7 +75,7 @@ ns.defaults = {
     },
 }
 
-ns.issecret = issecretvalue or function() return false end
+ns.issecret = FrogLib.issecret
 
 function ns.Print(...)
     print("|cffffd100FrogTarget|r:", ...)
@@ -91,105 +92,17 @@ local function CopyDefaults(src, dst)
     end
 end
 
--- Text templates: "Lv level name" -> ("Lv %s %s", {level, name}). Same scheme as
--- PersonalResourceTweaks, plus the level and name words. Values may be secret, so they're
--- only ever formatted engine-side by SetFormattedText.
-local compiled = {}
-function ns.Compile(template)
-    local c = compiled[template]
-    if c then return c end
-    local args = {}
-    local pattern = template:gsub("%%", "%%%%")
-    pattern = pattern:gsub("||", "|")
-    pattern = pattern:gsub("|", "||")
-    pattern = pattern:gsub("(%a+)(%.?%d*)", function(word, suffix)
-        local w = word:lower()
-        if w == "name" or w == "level" then
-            args[#args + 1] = w
-            return "%s" .. suffix
-        elseif w == "value" or w == "max" then
-            args[#args + 1] = w
-            return "%d" .. suffix
-        elseif w == "percent" then
-            args[#args + 1] = "percent"
-            local places = tonumber(suffix:match("^%.(%d)"))
-            if places then return "%." .. math.min(places, 3) .. "f%%" end
-            return "%d%%" .. suffix
-        end
-    end)
-    c = { pattern = pattern, args = args }
-    compiled[template] = c
-    return c
-end
-
--- The level as the game's target frame shows it (text.levelColor): in the colour for how hard
--- the unit is for you (grey, green, yellow, orange, red), or a skull when it's too high to show.
--- The colour codes sit inside the text, so they win over a tinted text colour.
-local SKULL = "|TInterface\\TargetingFrame\\UI-TargetingFrame-Skull:0|t"
-
-local function Level(unit)
-    local level = UnitLevel(unit)
-    if ns.issecret(level) then return level end
-    local coloured = ns.db.text.levelColor
-    if not level or level < 0 then return coloured and SKULL or "??" end -- skull-level bosses
-    if coloured and GetCreatureDifficultyColor then
-        local c = GetCreatureDifficultyColor(level)
-        if c then
-            return string.format("|cff%02x%02x%02x%d|r", c.r * 255, c.g * 255, c.b * 255, level)
-        end
-    end
-    return tostring(level)
-end
-
-local function HealthPercent(unit)
-    if UnitHealthPercent and CurveConstants then
-        return UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
-    end
-    local h, m = UnitHealth(unit), UnitHealthMax(unit)
-    if ns.issecret(h) or ns.issecret(m) or m == 0 then return 0 end
-    return h / m * 100
-end
-
-local function PowerPercent(unit)
-    if UnitPowerPercent and CurveConstants then
-        local ok, p = pcall(UnitPowerPercent, unit, nil, false, CurveConstants.ScaleTo100)
-        if ok and (ns.issecret(p) or p) then return p end
-    end
-    local v, m = UnitPower(unit), UnitPowerMax(unit)
-    if ns.issecret(v) or ns.issecret(m) or m == 0 then return 0 end
-    return v / m * 100
-end
-
--- A unit's name as the game's own frames show it: on Forever that includes the surname
--- (GetUnitName's second argument), where UnitName gives only the first name.
-local function FullName(unit)
-    if GetUnitName then
-        local ok, name = pcall(GetUnitName, unit, true)
-        if ok and name then return name end
-    end
-    return UnitName(unit)
-end
-
+-- Text templates and their words (name, level, class, value, max, percent, power...):
+-- FrogLib.Text and FrogLib.Unit, shared with XIVTarget and FrogFrames. Values may be secret, so
+-- they're only ever formatted engine-side by SetFormattedText.
 -- Fills a FontString from a template for a unit. fake = values for the unlocked preview;
 -- power = value, max and percent are the unit's power rather than its health.
+local textOpts = {}
 function ns.SetUnitText(fs, template, unit, fake, power)
-    if not template or strtrim(template) == "" then
-        fs:Hide()
-        return
-    end
-    fs:Show()
-    local vals = fake
-    if not vals then
-        vals = { name = FullName(unit), level = Level(unit) }
-        if power then
-            vals.value, vals.max, vals.percent = UnitPower(unit), UnitPowerMax(unit), PowerPercent(unit)
-        else
-            vals.value, vals.max, vals.percent = UnitHealth(unit), UnitHealthMax(unit), HealthPercent(unit)
-        end
-    end
-    local c = ns.Compile(template)
-    local a = c.args
-    pcall(fs.SetFormattedText, fs, c.pattern, vals[a[1]], vals[a[2]], vals[a[3]], vals[a[4]], vals[a[5]], vals[a[6]])
+    textOpts.fake, textOpts.power = fake or nil, power
+    textOpts.levelColor = ns.db.text.levelColor -- coloured by difficulty, a skull for bosses
+    textOpts.classColor = true
+    FrogLib.Unit.SetText(fs, template, unit, textOpts)
 end
 
 function ns.Refresh()
