@@ -120,23 +120,9 @@ function Bar:Init()
     f:SetHeight(26)
     f:SetClampedToScreen(true)
     f:SetMovable(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", function(frame)
-        frame:StartMoving()
-        ns.Grid:Track(frame)
-    end)
-    f:SetScript("OnDragStop", function(frame)
-        frame:StopMovingOrSizing()
-        ns.Grid:Track(nil)
-        -- Centred exactly when let go near the middle of the screen (Grid.lua).
-        local p, rp, x, y = ns.Grid:Snap(frame)
-        self:Own().point = { p, "UIParent", rp, x, y }
-    end)
-    -- Tint shown only while unlocked, marking the draggable area.
-    f.unlockTint = f:CreateTexture(nil, "BACKGROUND")
-    f.unlockTint:SetPoint("TOPLEFT", -4, 4)
-    f.unlockTint:SetPoint("BOTTOMRIGHT", 4, -4)
-    f.unlockTint:SetColorTexture(0.3, 0.6, 1, 0.2)
+    -- Dragged while unlocked, centred exactly when let go near the middle of the screen; the
+    -- tint, shown only then, marks it (FrogLib's Mover.lua and Grid.lua).
+    FrogLib.Mover.Make(f, { save = function(point) self:Own().point = point end, grid = true, tint = 4 })
     self.frame = f
 
     local g = ns.CreateGauge(f)
@@ -154,6 +140,7 @@ function Bar:Init()
     self.left:SetWordWrap(false)
 
     self:BuildPower()
+    self:BuildCombo()
     self:BuildCast()
     self:BuildToT()
     self.icons = {}
@@ -225,6 +212,17 @@ function Bar:BuildPower()
     p.text:SetPoint("CENTER", p.bar, "CENTER", 0, 0)
     p.bar:Hide()
     self.power = p
+end
+
+-- Your combo points on the target bar: a row of small bars in the look, from FrogLib's
+-- Combo.lua (only for a character that has them).
+function Bar:BuildCombo()
+    if self.unit ~= "target" or not FrogLib.Combo.Has() then return end
+    self.combo = FrogLib.Combo.NewRow(self.frame, function(_, holder)
+        local g = ns.CreateGauge(holder)
+        return g, g.bar
+    end)
+    FrogLib.Combo.Watch(function() self:UpdateCombo() end, function() self:ApplyCombo() end)
 end
 
 -- FFXIV shows an enemy's cast as a glowing white-gold line floating over the right half of
@@ -374,13 +372,53 @@ function Bar:PowerGap()
     return px * 3
 end
 
--- How far the power bar reaches below the health bar, so the auras and a cast bar below clear
--- it. From the settings alone, not from whether the unit has power, so nothing jumps about.
-function Bar:PowerDrop()
+-- How far the power bar reaches below the health bar. From the settings alone, not from whether
+-- the unit has power, so nothing jumps about.
+function Bar:PowerReach()
     if not self:Has("power") then return 0 end
     local cfg = ns.db.power
     if cfg.float then return math.max(0, cfg.height / 2 - cfg.offset) end
     return self:PowerGap() + cfg.height
+end
+
+-- How far the combo points reach below the power bar (kept out of cat form too, so nothing
+-- jumps with every shift).
+function Bar:ComboDrop()
+    local cfg = ns.db.combo
+    if not (self.combo and cfg.enabled) then return 0 end
+    return self:PowerGap() + cfg.height
+end
+
+-- How far everything under the health bar reaches (the power bar, the combo points), so the
+-- auras and a cast bar below clear it.
+function Bar:PowerDrop()
+    return self:PowerReach() + self:ComboDrop()
+end
+
+function Bar:ApplyCombo()
+    local row, db = self.combo, ns.db
+    if not row then return end
+    local cfg = db.combo
+    if not (cfg.enabled and row:Refresh(not db.locked)) then
+        row.holder:Hide()
+        return
+    end
+    local c, gap = cfg.color, self:PowerGap()
+    -- Their borders just meet, as the health and power bars' do, plus any extra room.
+    row:Layout(self:Own().width, cfg.height, gap + cfg.spacing, function(g, w, h)
+        g:SetHeight(h)
+        g:SetTexture(db.texture)
+        g.bar:SetWidth(w)
+        g:SetColor(c.r, c.g, c.b)
+    end)
+    row.holder:ClearAllPoints()
+    row.holder:SetPoint("TOPLEFT", self.gauge.bar, "BOTTOMLEFT", 0, -(self:PowerReach() + gap))
+    self:UpdateCombo()
+end
+
+-- The count (a sample while unlocked); it may be secret, so it only goes into the bars.
+function Bar:UpdateCombo()
+    if self.combo then self.combo:Update(not ns.db.locked, ns.db.combo.hideEmpty) end
 end
 
 function Bar:ApplyPower()
@@ -412,7 +450,7 @@ function Bar:Apply()
     f:SetPoint(own.point[1], UIParent, own.point[3], own.point[4], own.point[5])
     f:EnableMouse(not db.locked)
     f.unlockTint:SetShown(not db.locked)
-    ns.Grid:SetShown(not db.locked)
+    FrogLib.Grid:SetShown(not db.locked, "FrogTarget")
     if self.unit == "target" then
         -- Combo points are drawn on Blizzard's target frame, so they stay.
         FrogLib.Hider.Set(ADDON, "TargetFrame", db.hideTargetFrame, { keep = { "ComboFrame" } })
@@ -433,6 +471,7 @@ function Bar:Apply()
     self.right:SetPoint("BOTTOMRIGHT", self.gauge.bar, "TOPRIGHT", -1, lift)
 
     self:ApplyPower()
+    self:ApplyCombo()
 
     local c = self.cast
     c:ClearAllPoints()

@@ -2,7 +2,7 @@
 ## Title: FrogTarget
 ## Category: Frog Wizard
 ## Notes: A target bar in WoW's own art (Classic or Forever): the name above a long bar, the cast and auras around it, and your target's target alongside.
-## Version: 0.2.1
+## Version: 0.2.2
 ## OptionalDeps: FrogUI
 ## SavedVariables: FrogTargetDB
 ## IconTexture: Interface\Icons\Ability_Hunter_SniperShot
@@ -12,7 +12,6 @@ Libs\FrogLib\FrogLib.xml
 Core.lua
 Media.lua
 Gauge.lua
-Grid.lua
 Auras.lua
 Target.lua
 Config.lua

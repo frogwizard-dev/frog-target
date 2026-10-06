@@ -34,7 +34,8 @@ local function HasAtlas(name)
     return name and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(name) ~= nil
 end
 
-local Gauge = {}
+-- The absorb shield methods are FrogLib's (Gauge.lua), looked up there each time.
+local Gauge = setmetatable({}, { __index = function(_, k) return FrogLib.Gauge.Absorb[k] end })
 Gauge.__index = Gauge
 
 function Gauge:Style()
@@ -93,22 +94,13 @@ function Gauge:Layout()
     local style, bar = self:Style(), self.bar
     bar:SetHeight(self.h)
 
-    if style.frame then self.frame:Place(ns.db and ns.db.frameThickness) end
     self.track:SetColorTexture(0, 0, 0, self.trackAlpha or 0.55)
-    self.frame:SetShown(style.frame == true)
-
-    if style.stone then
-        -- The stone line is the outer ~3px of its 12px edge: with the frame 3px past the bar, the
-        -- line meets the fill, with no dark gap between them.
-        Borders.ColorStone(self.stone, ns.db and ns.db.borderColor)
-        self.stone:Show()
-    else
-        self.stone:Hide()
-    end
-
-    -- One screen pixel, outside the bar.
-    self.edge:Place(1, 0, { r = 0, g = 0, b = 0 })
-    self.edge:SetShown(style.edge == true)
+    -- Classic: the stone, 3px past the bar, so its line (the outer ~3px of its 12px edge) meets
+    -- the fill with no dark gap. Modern: one black screen pixel outside the bar.
+    local border = (style.stone and "classic") or (style.frame and "forever") or (style.edge and "pixel") or "none"
+    Borders.Show({ edges = self.edge, stone = self.stone, forever = self.frame }, border, { size = 1,
+        color = { r = 0, g = 0, b = 0 }, stoneColor = ns.db and ns.db.borderColor or { r = 0.75, g = 0.75, b = 0.75 },
+        thickness = ns.db and ns.db.frameThickness })
 
     self.spark:SetSize(math.max(10, self.h * 1.6), self.h * 2.6)
     self:ApplyTexture()
@@ -150,89 +142,4 @@ end
 function Gauge:SetValues(value, max, instant)
     self.bar:SetMinMaxValues(0, max)
     self.bar:SetValue(value, instant and IMMEDIATE or SMOOTH)
-end
-
-------------------------------------------------------------------------------
--- Absorb shields (optional: EnableAbsorb once, then SetAbsorb), as in the XIV addons
-------------------------------------------------------------------------------
-
--- A shield fills the missing part of the bar from the fill's edge, and whatever doesn't fit
--- there is laid over the right end of the fill (so a shield at full health still shows). The
--- amount can be secret, so the split is done by clipping, never arithmetic:
---   ahead: a bar starting at the fill's edge, clipped to the missing part -> min(shield, missing)
---   over:  a right-to-left bar across the bar, clipped to the fill        -> max(0, shield - missing)
-local SHIELD_STRIPES = "Interface\\RaidFrame\\Shield-Overlay" -- Blizzard's diagonal shield stripes
-
-local function ShieldBar(parent)
-    local sb = CreateFrame("StatusBar", nil, parent)
-    sb:SetStatusBarTexture(WHITE)
-    sb:SetMinMaxValues(0, 1)
-    sb:SetValue(0)
-    local stripes = sb:CreateTexture(nil, "ARTWORK", nil, 1)
-    sb.hasStripes = stripes:SetTexture(SHIELD_STRIPES, "REPEAT", "REPEAT") and true or false
-    stripes:SetHorizTile(true)
-    stripes:SetVertTile(true)
-    stripes:SetAllPoints(sb:GetStatusBarTexture())
-    sb.stripes = stripes
-    return sb
-end
-
-function Gauge:EnableAbsorb()
-    if self.absorb then return end
-    local bar = self.bar
-    local a = {}
-    a.missClip = CreateFrame("Frame", nil, bar)
-    a.missClip:SetClipsChildren(true)
-    a.ahead = ShieldBar(a.missClip)
-    a.fillClip = CreateFrame("Frame", nil, bar)
-    a.fillClip:SetClipsChildren(true)
-    a.over = ShieldBar(a.fillClip)
-    a.over:SetReverseFill(true)
-    a.over:SetAllPoints(bar)
-    for _, f in ipairs({ a.missClip, a.fillClip }) do f:SetFrameLevel(bar:GetFrameLevel() + 2) end
-    bar:HookScript("OnSizeChanged", function(_, w) a.ahead:SetWidth(w) end)
-    a.ahead:SetWidth(bar:GetWidth())
-    self.absorb = a
-    self:AnchorAbsorb()
-    self:SetAbsorbColor(1, 1, 1)
-end
-
-function Gauge:AnchorAbsorb()
-    local a = self.absorb
-    if not a then return end
-    local bar, fill = self.bar, self.bar:GetStatusBarTexture()
-    a.missClip:ClearAllPoints()
-    a.missClip:SetPoint("TOPLEFT", fill, "TOPRIGHT")
-    a.missClip:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT")
-    a.ahead:ClearAllPoints()
-    a.ahead:SetPoint("TOPLEFT", fill, "TOPRIGHT")
-    a.ahead:SetPoint("BOTTOMLEFT", fill, "BOTTOMRIGHT")
-    a.fillClip:ClearAllPoints()
-    a.fillClip:SetPoint("TOPLEFT", bar, "TOPLEFT")
-    a.fillClip:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT")
-end
-
-function Gauge:SetAbsorbColor(r, g, b)
-    local a = self.absorb
-    if not a then return end
-    for _, sb in ipairs({ a.ahead, a.over }) do
-        sb:SetStatusBarColor(r, g, b, sb.hasStripes and 0.25 or 0.55)
-        sb.stripes:SetVertexColor(r, g, b, 0.85)
-    end
-end
-
-function Gauge:SetAbsorb(value, max)
-    local a = self.absorb
-    if not a then return end
-    for _, sb in ipairs({ a.ahead, a.over }) do
-        sb:SetMinMaxValues(0, max)
-        sb:SetValue(value)
-    end
-end
-
-function Gauge:ShowAbsorb(shown)
-    local a = self.absorb
-    if not a then return end
-    a.missClip:SetShown(shown)
-    a.fillClip:SetShown(shown)
 end

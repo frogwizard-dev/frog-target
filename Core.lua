@@ -62,6 +62,9 @@ ns.defaults = {
     -- and raised `offset` pixels. text: a template like the ones above (value, max, percent are
     -- the power's); empty hides it.
     power = { enabled = false, float = true, width = 60, height = 8, offset = 0, x = 0, hideEmpty = true, text = "", textSize = 10 },
+    -- Your combo points on the target (rogues; druids in cat form): a row of small bars in the
+    -- look, under the bar and its power bar. spacing: extra room between them.
+    combo = { enabled = true, hideEmpty = true, height = 6, spacing = 0, color = { r = 1, g = 0.82, b = 0.3 } },
     -- A second bar, the same as the target's, for your focus. Its own place, scale and width, and
     -- its own switches for the parts; the look, the text and the parts' settings are shared.
     focus = {
@@ -77,20 +80,9 @@ ns.defaults = {
 
 ns.issecret = FrogLib.issecret
 
-function ns.Print(...)
-    print("|cffffd100FrogTarget|r:", ...)
-end
+ns.Print = FrogLib.Util.Printer("FrogTarget", "ffd100")
 
-local function CopyDefaults(src, dst)
-    for k, v in pairs(src) do
-        if type(v) == "table" then
-            if type(dst[k]) ~= "table" then dst[k] = {} end
-            CopyDefaults(v, dst[k])
-        elseif dst[k] == nil then
-            dst[k] = v
-        end
-    end
-end
+local CopyDefaults = FrogLib.Util.CopyDefaults
 
 -- Text templates and their words (name, level, class, value, max, percent, power...):
 -- FrogLib.Text and FrogLib.Unit, shared with XIVTarget and FrogFrames. Values may be secret, so

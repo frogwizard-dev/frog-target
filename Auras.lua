@@ -15,52 +15,13 @@ local SORT = AuraContainerSortMethod and AuraContainerSortMethod.Default
 local SORT_DIR = AuraContainerSortDirection and AuraContainerSortDirection.Normal
 local TIMER_HEIGHT = 12 -- the timer printed under each icon
 
-local formatter
-local function DurationFormatter()
-    if formatter ~= nil then return formatter or nil end
-    formatter = false
-    local R = Enum.NumericRuleFormatRounding
-    if C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and R then
-        local f = C_StringUtil.CreateNumericRuleFormatter()
-        if pcall(f.SetBreakpoints, f, {
-            { threshold = 0, format = "%d", step = 1, rounding = R.Up },
-            { threshold = 60, format = "%dm", step = 1, rounding = R.Up, components = { { div = 60 } } },
-            { threshold = 61, format = "%dm", step = 1, rounding = R.Down, components = { { div = 60 } } },
-            { threshold = 3600, format = "%dh", step = 1, rounding = R.Down, components = { { div = 3600 } } },
-        }) then
-            formatter = f
-        end
-    end
-    return formatter or nil
-end
-
-local function CallEither(c, newName, oldName, ...)
-    local f = c[newName] or c[oldName]
-    if f then pcall(f, c, ...) end
-end
+local A = FrogLib.Auras -- the rows' building blocks (FrogLib's Auras.lua)
 
 -- Rounded icons, the shape of FrogUI's action bar buttons (and the cooldown manager's): the
 -- icon cut by the rounded mask inside a 2px border, the border rounded the same way round the
 -- whole button, and the cooldown sweep following the corners. Square: a 1px border.
-local MASK = "UI-HUD-CoolDownManager-Mask"
-local SWIPE = "Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe"
-
 local function Shape(icon, border, button, cooldown)
-    local rounded = ns.db.auras.rounded
-    local inset = rounded and 2 or 1
-    icon:ClearAllPoints()
-    icon:SetPoint("TOPLEFT", button, "TOPLEFT", inset, -inset)
-    icon:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -inset, inset)
-    if not rounded then return end
-    local inner = button:CreateMaskTexture()
-    inner:SetAtlas(MASK)
-    inner:SetAllPoints(icon)
-    pcall(icon.AddMaskTexture, icon, inner)
-    local outer = button:CreateMaskTexture()
-    outer:SetAtlas(MASK)
-    outer:SetAllPoints(button)
-    pcall(border.AddMaskTexture, border, outer)
-    if cooldown and cooldown.SetSwipeTexture then pcall(cooldown.SetSwipeTexture, cooldown, SWIPE) end
+    A.Shape(icon, border, button, cooldown, ns.db.auras.rounded)
 end
 
 local function StyleButton(d)
@@ -78,40 +39,12 @@ end
 -- styled: the row's list of styled buttons, restyled when the settings change.
 local function MakeInit(styled, row, harmful)
     return function(button)
-        local d = { button = button, row = row }
-        d.border = button:CreateTexture(nil, "BACKGROUND")
-        d.border:SetAllPoints()
-        if harmful then
-            d.border:SetColorTexture(0.75, 0.12, 0.08, 1)
-        else
-            d.border:SetColorTexture(0, 0, 0, 1)
-        end
-        d.icon = button:CreateTexture(nil, "ARTWORK")
-        d.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        d.cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
-        Shape(d.icon, d.border, button, d.cooldown)
-        d.cooldown:SetAllPoints(d.icon)
-        d.cooldown:SetDrawEdge(false)
-        d.cooldown:SetReverse(true)
-        d.cooldown:SetHideCountdownNumbers(true)
-        local carrier = CreateFrame("Frame", nil, button)
-        carrier:SetAllPoints()
-        carrier:SetFrameLevel(d.cooldown:GetFrameLevel() + 1)
-        carrier:EnableMouse(false)
-        d.stack = carrier:CreateFontString(nil, "OVERLAY")
-        d.stack:SetPoint("BOTTOMRIGHT", -1, 1)
         -- The timer goes under the icon rather than on it.
-        d.duration = carrier:CreateFontString(nil, "OVERLAY")
-        d.duration:SetPoint("TOP", button, "BOTTOM", 0, -1)
-        StyleButton(d)
-
-        pcall(button.SetMouseClickEnabled, button, false)
-        button:SetIcon(d.icon)
-        button:SetDurationCooldown(d.cooldown)
-        button:SetApplicationCount(d.stack, {})
-        if not pcall(button.SetDurationText, button, d.duration, { textFormatter = DurationFormatter() }) then
-            pcall(button.SetDurationText, button, d.duration, {})
-        end
+        local d = A.InitButton(button, { border = harmful and { 0.75, 0.12, 0.08 } or nil,
+            rounded = ns.db.auras.rounded, style = function(new)
+                new.row = row
+                StyleButton(new)
+            end })
         table.insert(styled, d)
     end
 end
@@ -242,22 +175,13 @@ end
 function Auras:Build(row, parent, anchor)
     local r, all = self.rows[row], ns.db.auras
     local cfg = all[row]
-    if r.container then
-        pcall(r.container.SetUnit, r.container, "none")
-        r.container:Hide()
-        r.container = nil
-    end
-    if not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then
-        C_AddOns.LoadAddOn("Blizzard_AuraContainer")
-    end
-    local ok, c = pcall(CreateFrame, "AuraContainer", nil, parent, "CustomAuraContainerTemplate")
-    if not ok then return end
+    A.Release(r.container)
+    r.container = nil
+    local c = A.NewContainer(parent)
+    if not c then return end
 
-    c:SetSize(1, 1)
     c:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, self:RowTop(row))
-    CallEither(c, "SetFlowLayoutAnchorPoint", "SetAuraLayoutAnchorPoint", "TOPLEFT")
-    CallEither(c, "SetFlowLayoutGrowthDirection", "SetAuraLayoutGrowthDirection",
-        AnchorUtil.FlowDirection.Right, AnchorUtil.FlowDirection.Down)
+    A.Flow(c, "TOPLEFT", "RIGHT", "DOWN")
 
     wipe(r.styled)
     r.keys = {}
@@ -293,7 +217,7 @@ function Auras:Apply(parent, anchor)
         if c then
             local layout = Layout(all[row], all.spacing)
             for _, key in ipairs(r.keys) do pcall(c.SetAuraGroupLayout, c, key, layout) end
-            CallEither(c, "SetFlowLayoutMaximumLineSize", "SetAuraLayoutRowWidth", self.owner:Own().width + 0.4)
+            A.SetLineSize(c, self.owner:Own().width + 0.4)
             c:SetShown(self:Shown(row))
             for _, d in ipairs(r.styled) do pcall(StyleButton, d) end
         end
