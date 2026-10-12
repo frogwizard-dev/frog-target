@@ -9,7 +9,7 @@ local UI = FrogLib.UI.Kit({ refresh = function() ns.Refresh() end })
 local Label, Button, Checkbox, Stepper, Dropdown, Options, ColorSwatch, TextBox, Placer =
     UI.Label, UI.Button, UI.Checkbox, UI.Stepper, UI.Dropdown, UI.Options, UI.ColorSwatch, UI.TextBox, UI.Placer
 
-local OUTLINES = Options("", "None", "OUTLINE", "Outline", "THICKOUTLINE", "Thick outline")
+local OUTLINES = Options("", "None", "SHADOW", "Drop shadow", "OUTLINE", "Outline", "THICKOUTLINE", "Thick outline")
 local AURA_MODES = Options("mine", "Only mine", "all", "Mine, then everyone else's")
 local ICON_ANCHORS = Options("left", "Left of the name", "right", "Past the end of the bar", "above", "Above the name")
 local COLOR_MODES = Options("reaction", "Hostile / neutral / friendly (players by class)",
