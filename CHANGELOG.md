@@ -1,5 +1,9 @@
 # FrogTarget
 
+## 0.2.4
+
+- Combo points no longer show twice: with Blizzard's target frame hidden and FrogTarget's own combo points on, Blizzard's combo points go with its frame (they used to stay, and stayed even when another addon, FrogFrames say, hid them).
+
 ## 0.2.3
 
 - Font outline: a new "Drop shadow" choice, no outline but a soft black shadow under the text (FrogLib's).

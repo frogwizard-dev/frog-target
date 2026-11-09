@@ -452,8 +452,10 @@ function Bar:Apply()
     f.unlockTint:SetShown(not db.locked)
     FrogLib.Grid:SetShown(not db.locked, "FrogTarget")
     if self.unit == "target" then
-        -- Combo points are drawn on Blizzard's target frame, so they stay.
-        FrogLib.Hider.Set(ADDON, "TargetFrame", db.hideTargetFrame, { keep = { "ComboFrame" } })
+        -- Blizzard's combo points (drawn on its target frame) stay, unless ours are on: then
+        -- they'd be shown twice (and another addon hiding them couldn't).
+        local ownCombo = self.combo and db.combo.enabled
+        FrogLib.Hider.Set(ADDON, "TargetFrame", db.hideTargetFrame, { keep = ownCombo and {} or { "ComboFrame" } })
     else
         FrogLib.Hider.Set(ADDON, "FocusFrame", own.enabled and own.hideBlizzard)
     end
