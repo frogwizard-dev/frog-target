@@ -2,57 +2,53 @@ local _, ns = ...
 local Auras = {}
 Auras.__index = Auras
 
--- Status effects under a unit's bar, in two rows, each with its own settings: debuffs (yours,
--- then everyone else's) and buffs, in either order (auras.order). Each row is one of 12.1's
--- AuraContainers: the engine picks and draws the auras, so it keeps working where addons can't
--- read aura data. Lessons carried over from PersonalResourceTweaks: position a container before
--- setting it up, never anchor anything to it, and size the buttons ourselves (the engine makes
--- them 0x0). How many auras there are can be secret, so each row is given room for one line.
--- Each bar (the target's, the focus's) has its own set: ns.NewAuras(bar). The row settings are
--- shared; whether a bar shows them at all is the bar's own (bar:Has("auras")).
+-- Status effects under a unit's bar in two rows with their own settings: debuffs (yours, then
+-- others') and buffs, either on top. Each row is one of 12.1's AuraContainers, which pick and draw
+-- the auras where addons can't read them; how many there are can be secret, so each row gets room
+-- for one line. Each bar has its own set (ns.NewAuras(bar)); the row settings are shared.
 
 local SORT = AuraContainerSortMethod and AuraContainerSortMethod.Default
 local SORT_DIR = AuraContainerSortDirection and AuraContainerSortDirection.Normal
 local TIMER_HEIGHT = 12 -- the timer printed under each icon
 
-local A = FrogLib.Auras -- the rows' building blocks (FrogLib's Auras.lua)
+local AuraKit = FrogLib.Auras -- the rows' building blocks (FrogLib's Auras.lua)
 
--- Rounded icons, the shape of FrogUI's action bar buttons (and the cooldown manager's): the
--- icon cut by the rounded mask inside a 2px border, the border rounded the same way round the
--- whole button, and the cooldown sweep following the corners. Square: a 1px border.
+-- Rounded icons, the shape of FrogUI's action bar buttons, the cooldown sweep following the
+-- corners; square: a 1px border.
 local function Shape(icon, border, button, cooldown)
-    A.Shape(icon, border, button, cooldown, ns.db.auras.rounded)
+    AuraKit.Shape(icon, border, button, cooldown, ns.db.auras.rounded)
 end
 
-local function StyleButton(d)
-    local all, t = ns.db.auras, ns.db.text
-    local cfg = all[d.row]
-    if d.size ~= cfg.size and pcall(d.button.SetSize, d.button, cfg.size, cfg.size) then
-        d.size = cfg.size
+-- The engine makes the buttons 0x0, so they're sized here.
+local function StyleButton(parts)
+    local all, text = ns.db.auras, ns.db.text
+    local settings = all[parts.row]
+    if parts.size ~= settings.size and pcall(parts.button.SetSize, parts.button, settings.size, settings.size) then
+        parts.size = settings.size
     end
-    local font, size = all.font or t.font, math.max(9, math.floor(cfg.size * 0.46))
-    ns.Media:SetFont(d.stack, font, size, t.outline)
-    ns.Media:SetFont(d.duration, font, size, t.outline)
-    d.duration:SetShown(cfg.showTimer)
+    local font, size = all.font or text.font, math.max(9, math.floor(settings.size * 0.46))
+    ns.Media:SetFont(parts.stack, font, size, text.outline)
+    ns.Media:SetFont(parts.duration, font, size, text.outline)
+    parts.duration:SetShown(settings.showTimer)
 end
 
 -- styled: the row's list of styled buttons, restyled when the settings change.
 local function MakeInit(styled, row, harmful)
     return function(button)
         -- The timer goes under the icon rather than on it.
-        local d = A.InitButton(button, { border = harmful and { 0.75, 0.12, 0.08 } or nil,
+        local parts = AuraKit.InitButton(button, { border = harmful and { 0.75, 0.12, 0.08 } or nil,
             rounded = ns.db.auras.rounded, style = function(new)
                 new.row = row
                 StyleButton(new)
             end })
-        table.insert(styled, d)
+        table.insert(styled, parts)
     end
 end
 
-local function Layout(cfg, spacing)
+local function Layout(settings, spacing)
     -- Extra line spacing leaves room for the timer printed under each icon.
-    return { elementWidth = cfg.size, elementHeight = cfg.size, elementSpacing = spacing,
-        lineSpacing = spacing + (cfg.showTimer and TIMER_HEIGHT or 0) }
+    return { elementWidth = settings.size, elementHeight = settings.size, elementSpacing = spacing,
+        lineSpacing = spacing + (settings.showTimer and TIMER_HEIGHT or 0) }
 end
 
 ------------------------------------------------------------------------------
@@ -61,7 +57,7 @@ end
 
 -- owner: the bar they hang under (Target.lua), for its unit, its switches and its width.
 function ns.NewAuras(owner)
-    local a = setmetatable({
+    local auras = setmetatable({
         owner = owner,
         unit = owner.unit,
         -- Per row: its container, what it was built with, its group keys and its styled buttons.
@@ -74,18 +70,17 @@ function ns.NewAuras(owner)
     watcher:RegisterUnitEvent("UNIT_AURA", owner.unit)
     watcher:RegisterEvent(owner.changeEvent)
     watcher:SetScript("OnEvent", function()
-        if ns.db then a:CheckEmpty() end
+        if ns.db then auras:CheckEmpty() end
     end)
-    return a
+    return auras
 end
 
 ------------------------------------------------------------------------------
 -- Where the rows go
 ------------------------------------------------------------------------------
 
--- How far below the health bar the auras start: clear of the classic look's stone border, of a
--- power bar hanging under the bar, and of the cast bar and its spell name when that sits below
--- the bar too.
+-- How far below the health bar the auras start: clear of the classic stone border, a power bar
+-- hanging under the bar, and the cast bar and its spell name when that sits below the bar too.
 function Auras:Top()
     local db = ns.db
     local y = (db.style == "classic" and -10 or -6) - self.owner:PowerDrop()
@@ -95,14 +90,13 @@ function Auras:Top()
     return y
 end
 
--- A row with nothing in it closes up (auras.fold), so the rows below move up, and opens again
--- when something lands. How many auras there are can be secret, but whether there are any isn't:
--- the first one's data comes back, or nothing does. Not while unlocked: the samples fill them.
 local function Filter(row)
     if row == "buffs" then return "HELPFUL" end
     return ns.db.auras.debuffs.mode == "mine" and "HARMFUL|PLAYER" or "HARMFUL"
 end
 
+-- How many auras there are can be secret, but whether there are any isn't: the first one's data
+-- comes back, or nothing does.
 function Auras:HasAny(row)
     if not UnitExists(self.unit) then return false end
     local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, self.unit, 1, Filter(row))
@@ -111,6 +105,8 @@ function Auras:HasAny(row)
     return aura ~= nil
 end
 
+-- A row with nothing in it closes up (auras.fold), so the rows below move up; not while unlocked,
+-- when the samples fill them.
 function Auras:Shown(row)
     local all = ns.db.auras
     if not (self.owner:Has("auras") and all[row].enabled) then return false end
@@ -132,8 +128,8 @@ function Auras:CheckEmpty()
 end
 
 local function Height(row)
-    local cfg = ns.db.auras[row]
-    return cfg.size + (cfg.showTimer and TIMER_HEIGHT or 0)
+    local settings = ns.db.auras[row]
+    return settings.size + (settings.showTimer and TIMER_HEIGHT or 0)
 end
 
 local function Order()
@@ -168,58 +164,60 @@ end
 ------------------------------------------------------------------------------
 
 function Auras:Signature(row)
-    local cfg = ns.db.auras[row]
-    return (cfg.mode or "") .. "|" .. cfg.max .. "|" .. self:RowTop(row) .. "|" .. tostring(ns.db.auras.rounded)
+    local settings = ns.db.auras[row]
+    return (settings.mode or "") .. "|" .. settings.max .. "|" .. self:RowTop(row) .. "|" .. tostring(ns.db.auras.rounded)
 end
 
+-- The container is placed before it's set up, and nothing is anchored to it (both lessons from
+-- PersonalResourceTweaks).
 function Auras:Build(row, parent, anchor)
-    local r, all = self.rows[row], ns.db.auras
-    local cfg = all[row]
-    A.Release(r.container)
-    r.container = nil
-    local c = A.NewContainer(parent)
-    if not c then return end
+    local built, all = self.rows[row], ns.db.auras
+    local settings = all[row]
+    AuraKit.Release(built.container)
+    built.container = nil
+    local container = AuraKit.NewContainer(parent)
+    if not container then return end
 
-    c:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, self:RowTop(row))
-    A.Flow(c, "TOPLEFT", "RIGHT", "DOWN")
+    container:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, self:RowTop(row))
+    AuraKit.Flow(container, "TOPLEFT", "RIGHT", "DOWN")
 
-    wipe(r.styled)
-    r.keys = {}
-    local layout = Layout(cfg, all.spacing)
-    local function add(key, filter, harmful)
-        local ok2, err = pcall(c.AddAuraGroup, c, key, filter, {
-            maxFrameCount = cfg.max, sortMethod = SORT, sortDirection = SORT_DIR,
-            initializeFrame = MakeInit(r.styled, row, harmful), layout = layout,
+    wipe(built.styled)
+    built.keys = {}
+    local layout = Layout(settings, all.spacing)
+    local function Add(key, filter, harmful)
+        local ok, message = pcall(container.AddAuraGroup, container, key, filter, {
+            maxFrameCount = settings.max, sortMethod = SORT, sortDirection = SORT_DIR,
+            initializeFrame = MakeInit(built.styled, row, harmful), layout = layout,
         })
-        if ok2 then r.keys[#r.keys + 1] = key else ns.Print("Couldn't set up status effects:", err) end
+        if ok then built.keys[#built.keys + 1] = key else ns.Print("Couldn't set up status effects:", message) end
     end
     if row == "debuffs" then
         -- Yours first, then everyone else's.
-        add("mine", "HARMFUL|PLAYER", true)
-        if cfg.mode == "all" then add("others", "HARMFUL|!PLAYER", true) end
+        Add("mine", "HARMFUL|PLAYER", true)
+        if settings.mode == "all" then Add("others", "HARMFUL|!PLAYER", true) end
     else
-        add("buffs", "HELPFUL", false)
+        Add("buffs", "HELPFUL", false)
     end
-    c:SetUnit(self.unit)
-    c:UpdateAllAuras()
-    r.container = c
-    r.signature = self:Signature(row)
+    container:SetUnit(self.unit)
+    container:UpdateAllAuras()
+    built.container = container
+    built.signature = self:Signature(row)
 end
 
 function Auras:Apply(parent, anchor)
     local all = ns.db.auras
     -- A bar that's switched off (the focus's) doesn't build its rows until it's switched on.
     local enabled = self.owner:Enabled()
-    for row, r in pairs(self.rows) do
+    for row, built in pairs(self.rows) do
         -- Where it sits is part of what it's built with: moving it means building it again.
-        if enabled and (not r.container or r.signature ~= self:Signature(row)) then self:Build(row, parent, anchor) end
-        local c = r.container
-        if c then
+        if enabled and (not built.container or built.signature ~= self:Signature(row)) then self:Build(row, parent, anchor) end
+        local container = built.container
+        if container then
             local layout = Layout(all[row], all.spacing)
-            for _, key in ipairs(r.keys) do pcall(c.SetAuraGroupLayout, c, key, layout) end
-            A.SetLineSize(c, self.owner:Own().width + 0.4)
-            c:SetShown(self:Shown(row))
-            for _, d in ipairs(r.styled) do pcall(StyleButton, d) end
+            for _, key in ipairs(built.keys) do pcall(container.SetAuraGroupLayout, container, key, layout) end
+            AuraKit.SetLineSize(container, self.owner:Own().width + 0.4)
+            container:SetShown(self:Shown(row))
+            for _, parts in ipairs(built.styled) do pcall(StyleButton, parts) end
         end
     end
 end
@@ -243,59 +241,59 @@ local SAMPLES = {
     },
 }
 
-function Auras:Sample(parent, row, i)
-    local s = self.samples[row][i]
+function Auras:Sample(parent, row, index)
+    local sample = self.samples[row][index]
     -- A sample's shape is fixed when it's made, like a real icon's: remade if the shape changed.
-    if s and s.rounded == ns.db.auras.rounded then return s end
-    if s then s:Hide() end
-    s = CreateFrame("Frame", nil, parent)
-    s.border = s:CreateTexture(nil, "BACKGROUND")
-    s.border:SetAllPoints()
-    s.icon = s:CreateTexture(nil, "ARTWORK")
-    s.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    Shape(s.icon, s.border, s)
-    s.rounded = ns.db.auras.rounded
-    s.stack = s:CreateFontString(nil, "OVERLAY")
-    s.stack:SetPoint("BOTTOMRIGHT", -1, 1)
-    s.duration = s:CreateFontString(nil, "OVERLAY")
-    s.duration:SetPoint("TOP", s, "BOTTOM", 0, -1)
-    self.samples[row][i] = s
-    return s
+    if sample and sample.rounded == ns.db.auras.rounded then return sample end
+    if sample then sample:Hide() end
+    sample = CreateFrame("Frame", nil, parent)
+    sample.border = sample:CreateTexture(nil, "BACKGROUND")
+    sample.border:SetAllPoints()
+    sample.icon = sample:CreateTexture(nil, "ARTWORK")
+    sample.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    Shape(sample.icon, sample.border, sample)
+    sample.rounded = ns.db.auras.rounded
+    sample.stack = sample:CreateFontString(nil, "OVERLAY")
+    sample.stack:SetPoint("BOTTOMRIGHT", -1, 1)
+    sample.duration = sample:CreateFontString(nil, "OVERLAY")
+    sample.duration:SetPoint("TOP", sample, "BOTTOM", 0, -1)
+    self.samples[row][index] = sample
+    return sample
 end
 
 function Auras:Preview(parent, anchor, on)
-    local all, t = ns.db.auras, ns.db.text
-    for row, r in pairs(self.rows) do
-        if r.container then r.container:SetShown(self:Shown(row) and not on) end
-        local cfg = all[row]
+    local all, text = ns.db.auras, ns.db.text
+    for row, built in pairs(self.rows) do
+        if built.container then built.container:SetShown(self:Shown(row) and not on) end
+        local settings = all[row]
         local show = on and self:Shown(row)
-        local size = cfg.size
-        local font, fontSize = all.font or t.font, math.max(9, math.floor(size * 0.46))
-        for i, d in ipairs(SAMPLES[row]) do
-            local s = self:Sample(parent, row, i)
+        local size = settings.size
+        local font, fontSize = all.font or text.font, math.max(9, math.floor(size * 0.46))
+        for i, example in ipairs(SAMPLES[row]) do
+            local sample = self:Sample(parent, row, i)
             if show then
-                s:SetSize(size, size)
-                s:ClearAllPoints()
-                s:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", (i - 1) * (size + all.spacing), self:RowTop(row))
-                s.icon:SetTexture(d.icon)
+                sample:SetSize(size, size)
+                sample:ClearAllPoints()
+                sample:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", (i - 1) * (size + all.spacing), self:RowTop(row))
+                sample.icon:SetTexture(example.icon)
                 if row == "debuffs" then
-                    s.border:SetColorTexture(0.8, 0.1, 0.1, 1)
+                    sample.border:SetColorTexture(0.8, 0.1, 0.1, 1)
                 else
-                    s.border:SetColorTexture(0, 0, 0, 1)
+                    sample.border:SetColorTexture(0, 0, 0, 1)
                 end
-                ns.Media:SetFont(s.stack, font, fontSize, t.outline)
-                ns.Media:SetFont(s.duration, font, fontSize, t.outline)
-                s.stack:SetText(d.stack or "")
-                s.duration:SetText(cfg.showTimer and d.time or "")
+                ns.Media:SetFont(sample.stack, font, fontSize, text.outline)
+                ns.Media:SetFont(sample.duration, font, fontSize, text.outline)
+                sample.stack:SetText(example.stack or "")
+                sample.duration:SetText(settings.showTimer and example.time or "")
             end
-            s:SetShown(show)
+            sample:SetShown(show)
         end
     end
 end
 
 -- The containers are bound to a unit token ("target", "focus"); a new unit needs a fresh parse.
 function Auras:UnitChanged()
-    for _, r in pairs(self.rows) do
-        if r.container then pcall(r.container.UpdateAllAuras, r.container) end
+    for _, built in pairs(self.rows) do
+        if built.container then pcall(built.container.UpdateAllAuras, built.container) end
     end
 end

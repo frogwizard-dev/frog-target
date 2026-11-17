@@ -1,5 +1,13 @@
 # FrogTarget
 
+## 0.2.5
+
+- An interrupted channel shows red "Interrupted", and a red bar no longer carries over to your new target.
+- Names in Russian, Korean or Chinese draw in every font.
+- Shift-, ctrl- and alt-click on the bars now target too; the gamepad UI's target menu stays open.
+- The target's (and focus's) target is drawn in full when it changes and once a second, only its health in between.
+- Shared code (FrogLib 1.12.0): see its notes for the rest of what's fixed.
+
 ## 0.2.4
 
 - Combo points no longer show twice: with Blizzard's target frame hidden and FrogTarget's own combo points on, Blizzard's combo points go with its frame (they used to stay, and stayed even when another addon, FrogFrames say, hid them).

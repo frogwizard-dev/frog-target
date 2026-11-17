@@ -1,14 +1,9 @@
 local _, ns = ...
 
--- FrogTarget's bars, in WoW's own art, three looks (ns.db.style):
---   "classic": the 1.x status bar texture on a dark track, in the grey stone border tooltips
---              and old frames use;
---   "modern":  a plain fill on a dark track, with nothing round it but a 1px black
---              edge;
---   "forever": the cooldown manager's bar fill, in our own Forever-style frame (FrogLib's).
--- Same methods as the XIV addons' gauges, so Target.lua drives them unchanged: SetHeight,
--- SetTexture, SetColor, SetValues, and the absorb shield ones; SetSpark adds the cast bar's spark,
--- SetTrackAlpha darkens the empty part (the floating power bar).
+-- FrogTarget's bars in WoW's own art, three looks (ns.db.style): "classic", the 1.x bar in the grey
+-- stone border; "modern", a plain fill with a 1px black edge; "forever", the cooldown manager's fill
+-- in our Forever frame. The same methods as the XIV addons' gauges, so Target.lua drives them as is;
+-- SetSpark adds the cast bar's spark, SetTrackAlpha darkens the empty part (the floating power bar).
 
 local WHITE = "Interface\\Buttons\\WHITE8X8"
 local SPARK = "Interface\\CastingBar\\UI-CastingBar-Spark"
@@ -35,7 +30,7 @@ local function HasAtlas(name)
 end
 
 -- The absorb shield methods are FrogLib's (Gauge.lua), looked up there each time.
-local Gauge = setmetatable({}, { __index = function(_, k) return FrogLib.Gauge.Absorb[k] end })
+local Gauge = setmetatable({}, { __index = function(_, key) return FrogLib.Gauge.Absorb[key] end })
 Gauge.__index = Gauge
 
 function Gauge:Style()
@@ -47,32 +42,31 @@ function ns.CreateGauge(parent)
     bar:SetStatusBarTexture(WHITE)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0)
-    local g = setmetatable({ bar = bar, h = 12 }, Gauge)
+    local gauge = setmetatable({ bar = bar, height = 12 }, Gauge)
 
-    g.track = bar:CreateTexture(nil, "BACKGROUND")
-    g.track:SetAllPoints()
+    gauge.track = bar:CreateTexture(nil, "BACKGROUND")
+    gauge.track:SetAllPoints()
     -- Forever: our Forever-style frame round the bar.
-    g.frame = Borders.Forever(bar, "OVERLAY", 5)
+    gauge.frame = Borders.Forever(bar, "OVERLAY", 5)
 
-    -- Classic: the stone border, on a frame just outside the bar.
-    g.stone = Borders.Stone(bar, 3)
+    -- Classic: the stone border, on a frame right outside the bar.
+    gauge.stone = Borders.Stone(bar, 3)
 
     -- Modern: a thin dark edge round the bar.
-    g.edge = Borders.Edges(bar, bar, "OVERLAY", 6)
+    gauge.edge = Borders.Edges(bar, bar, "OVERLAY", 6)
 
-    g.spark = bar:CreateTexture(nil, "OVERLAY", nil, 7)
-    g.spark:SetTexture(SPARK)
-    g.spark:SetBlendMode("ADD")
-    g.spark:Hide()
+    gauge.spark = bar:CreateTexture(nil, "OVERLAY", nil, 7)
+    gauge.spark:SetTexture(SPARK)
+    gauge.spark:SetBlendMode("ADD")
+    gauge.spark:Hide()
 
-    g:Layout()
-    return g
+    gauge:Layout()
+    return gauge
 end
 
 -- The fill: the chosen texture, or the look's own (an atlas where the client has it).
 function Gauge:ApplyTexture()
     local style, path = self:Style(), self.texturePath
-    local fill
     if path and path ~= "" then
         self.bar:SetStatusBarTexture(path)
     elseif style.atlas and HasAtlas(style.atlas) then
@@ -83,7 +77,7 @@ function Gauge:ApplyTexture()
     else
         self.bar:SetStatusBarTexture(style.texture)
     end
-    fill = self.bar:GetStatusBarTexture()
+    local fill = self.bar:GetStatusBarTexture()
     self.spark:ClearAllPoints()
     self.spark:SetPoint("CENTER", fill, "RIGHT", 0, 0)
     self:AnchorAbsorb()
@@ -92,7 +86,7 @@ end
 
 function Gauge:Layout()
     local style, bar = self:Style(), self.bar
-    bar:SetHeight(self.h)
+    bar:SetHeight(self.height)
 
     self.track:SetColorTexture(0, 0, 0, self.trackAlpha or 0.55)
     -- Classic: the stone, 3px past the bar, so its line (the outer ~3px of its 12px edge) meets
@@ -102,7 +96,7 @@ function Gauge:Layout()
         color = { r = 0, g = 0, b = 0 }, stoneColor = ns.db and ns.db.borderColor or { r = 0.75, g = 0.75, b = 0.75 },
         thickness = ns.db and ns.db.frameThickness })
 
-    self.spark:SetSize(math.max(10, self.h * 1.6), self.h * 2.6)
+    self.spark:SetSize(math.max(10, self.height * 1.6), self.height * 2.6)
     self:ApplyTexture()
 end
 
@@ -111,8 +105,8 @@ function Gauge:SetStyle(style)
     self:Layout()
 end
 
-function Gauge:SetHeight(h)
-    self.h = h
+function Gauge:SetHeight(height)
+    self.height = height
     self:Layout()
 end
 
